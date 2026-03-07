@@ -1,0 +1,25 @@
+[package]
+name = "zerossh-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+russh = { path = "../russh/russh", default-features = false, features = ["rsa"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+ws_stream_wasm = { version = "0.7", features = ["tokio_io"] }
+async_io_stream = { version = "0.3", features = ["tokio_io"] }
+send_wrapper = "0.6"
+tokio = { version = "1", features = ["io-util", "sync"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+log = "0.4"
+web-sys = { version = "0.3", features = ["console"] }
+js-sys = "0.3"
+thiserror = "1"
+ssh-key = { version = "=0.6.16", features = ["ed25519", "encryption"], package = "internal-russh-forked-ssh-key" }
+# Enable wasm_js backend for getrandom 0.3 (transitive dep from rand 0.9)
+getrandom = { version = "0.3", features = ["wasm_js"] }
