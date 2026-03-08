@@ -6,6 +6,8 @@ export class TerminalUI {
   private terminal: Terminal;
   private fitAddon: FitAddon;
   private container: HTMLElement;
+  private pendingData: Uint8Array[] = [];
+  private rafScheduled = false;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -68,7 +70,31 @@ export class TerminalUI {
   }
 
   write(data: Uint8Array): void {
-    this.terminal.write(data);
+    this.pendingData.push(data);
+    if (!this.rafScheduled) {
+      this.rafScheduled = true;
+      requestAnimationFrame(() => this.flushPending());
+    }
+  }
+
+  private flushPending(): void {
+    this.rafScheduled = false;
+    const chunks = this.pendingData;
+    this.pendingData = [];
+    // Concatenate into single write to minimize xterm.js reflows
+    if (chunks.length === 1) {
+      this.terminal.write(chunks[0]);
+    } else if (chunks.length > 1) {
+      let total = 0;
+      for (const c of chunks) total += c.length;
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const c of chunks) {
+        merged.set(c, offset);
+        offset += c.length;
+      }
+      this.terminal.write(merged);
+    }
   }
 
   onData(cb: (data: string) => void): void {
