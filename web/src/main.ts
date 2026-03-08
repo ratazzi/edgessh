@@ -5,6 +5,7 @@ import { TerminalUI } from "./terminal";
 
 let client: SshClient | null = null;
 let terminalUI: TerminalUI | null = null;
+let connectionCheckTimer: ReturnType<typeof setInterval> | null = null;
 
 // DOM elements
 const connectPanel = document.getElementById("connect-panel")!;
@@ -134,10 +135,12 @@ async function handleConnect(e: Event): Promise<void> {
       onData,
     );
 
-    // Terminal input -> SSH
+    // Terminal input -> SSH (await to detect send failures)
     terminalUI.onData((data: string) => {
       const encoder = new TextEncoder();
-      client?.send_data(encoder.encode(data));
+      client?.send_data(encoder.encode(data)).catch(() => {
+        handleDisconnect();
+      });
     });
 
     // Terminal resize -> SSH
@@ -147,6 +150,14 @@ async function handleConnect(e: Event): Promise<void> {
 
     setStatus(true, `${username}@${host}:${port}`);
     showTerminal();
+
+    // Poll connection health every 3 seconds
+    connectionCheckTimer = setInterval(() => {
+      if (client && !client.is_connected()) {
+        console.warn("[zerossh] connection lost (detected by health check)");
+        handleDisconnect();
+      }
+    }, 3000);
   } catch (err) {
     terminalUI.dispose();
     terminalUI = null;
@@ -158,13 +169,24 @@ async function handleConnect(e: Event): Promise<void> {
 }
 
 async function handleDisconnect(): Promise<void> {
-  try {
-    await client?.disconnect();
-  } catch {
-    // ignore disconnect errors
+  if (connectionCheckTimer) {
+    clearInterval(connectionCheckTimer);
+    connectionCheckTimer = null;
   }
-  client?.free();
-  client = null;
+  // Try graceful disconnect with a timeout — if the event loop is stuck,
+  // the disconnect call will hang, so we race it with a 2s timer.
+  if (client) {
+    try {
+      await Promise.race([
+        client.disconnect(),
+        new Promise((r) => setTimeout(r, 2000)),
+      ]);
+    } catch {
+      // ignore disconnect errors
+    }
+    client.free();
+    client = null;
+  }
   terminalUI?.dispose();
   terminalUI = null;
   terminalEl.innerHTML = "";
