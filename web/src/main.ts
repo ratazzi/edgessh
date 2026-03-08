@@ -87,8 +87,6 @@ async function handleConnect(e: Event): Promise<void> {
   const port = (document.getElementById("port") as HTMLInputElement).value;
   const username = (document.getElementById("username") as HTMLInputElement)
     .value;
-  const proxyUrl = (document.getElementById("proxy-url") as HTMLInputElement)
-    .value;
 
   let credential: string;
   let passphrase = "";
@@ -104,8 +102,9 @@ async function handleConnect(e: Event): Promise<void> {
       .value;
   }
 
-  // Build WebSocket URL
-  const wsUrl = `${proxyUrl}/proxy?host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
+  // Build WebSocket URL (same origin)
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProto}//${location.host}/proxy?host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
 
   // Create terminal
   terminalUI = new TerminalUI(terminalEl);
