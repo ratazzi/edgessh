@@ -1,3 +1,5 @@
+import { connect } from "cloudflare:sockets";
+
 // Private IP validation: deny connections to internal networks
 function isPrivateIP(hostname: string): boolean {
   // IPv6 loopback and unique local
@@ -54,6 +56,8 @@ export default {
       return new Response("Connection to private IP denied", { status: 403 });
     }
 
+    console.log(`[proxy] connecting to ${host}:${port}`);
+
     // Accept the WebSocket
     const [client, server] = Object.values(new WebSocketPair());
 
@@ -63,7 +67,8 @@ export default {
     let tcpSocket: Socket;
     try {
       tcpSocket = connect({ hostname: host, port });
-    } catch {
+    } catch (e) {
+      console.error(`[proxy] TCP connect failed:`, e);
       server.close(1011, "Failed to connect to target");
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -72,13 +77,18 @@ export default {
     const tcpToWs = async () => {
       try {
         const reader = tcpSocket.readable.getReader();
+        let bytes = 0;
         for (;;) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            console.log(`[proxy] TCP read done, total ${bytes} bytes`);
+            break;
+          }
+          bytes += value.byteLength;
           server.send(value);
         }
-      } catch {
-        // TCP read error or socket closed
+      } catch (e) {
+        console.error(`[proxy] TCP read error:`, e);
       } finally {
         server.close(1000, "TCP connection closed");
       }
@@ -93,14 +103,17 @@ export default {
         if (data instanceof ArrayBuffer) {
           await writer.write(new Uint8Array(data));
         } else if (typeof data === "string") {
+          console.log(`[proxy] received text frame (${data.length} chars), converting to binary`);
           await writer.write(new TextEncoder().encode(data));
         }
-      } catch {
+      } catch (e) {
+        console.error(`[proxy] TCP write error:`, e);
         server.close(1011, "TCP write error");
       }
     });
 
-    server.addEventListener("close", async () => {
+    server.addEventListener("close", async (event) => {
+      console.log(`[proxy] WS closed: code=${event.code} reason=${event.reason}`);
       try {
         await writer.close();
       } catch {
@@ -109,7 +122,8 @@ export default {
       tcpSocket.close();
     });
 
-    server.addEventListener("error", () => {
+    server.addEventListener("error", (event) => {
+      console.error(`[proxy] WS error:`, event);
       try {
         writer.close();
       } catch {
