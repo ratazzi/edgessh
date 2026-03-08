@@ -26,8 +26,10 @@ function isPrivateIP(hostname: string): boolean {
   return false;
 }
 
+interface Env {}
+
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname !== "/proxy") {
@@ -74,21 +76,27 @@ export default {
     }
 
     // TCP -> WebSocket: read from TCP and forward to WebSocket
+    const t0 = Date.now();
+    const elapsed = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+
     const tcpToWs = async () => {
       try {
         const reader = tcpSocket.readable.getReader();
         let bytes = 0;
+        let lastRead = Date.now();
         for (;;) {
           const { done, value } = await reader.read();
           if (done) {
-            console.log(`[proxy] TCP read done, total ${bytes} bytes`);
+            const idleMs = Date.now() - lastRead;
+            console.log(`[proxy] TCP read done at ${elapsed()}, total ${bytes} bytes, idle ${idleMs}ms before close`);
             break;
           }
+          lastRead = Date.now();
           bytes += value.byteLength;
           server.send(value);
         }
       } catch (e) {
-        console.error(`[proxy] TCP read error:`, e);
+        console.error(`[proxy] TCP read error at ${elapsed()}:`, e);
       } finally {
         server.close(1000, "TCP connection closed");
       }
@@ -96,8 +104,10 @@ export default {
 
     // WebSocket -> TCP: receive from WebSocket and write to TCP
     const writer = tcpSocket.writable.getWriter();
+    let lastWsMsg = Date.now();
 
     server.addEventListener("message", async (event: MessageEvent) => {
+      lastWsMsg = Date.now();
       try {
         const data = event.data;
         if (data instanceof ArrayBuffer) {
@@ -107,7 +117,7 @@ export default {
           await writer.write(new TextEncoder().encode(data));
         }
       } catch (e) {
-        console.error(`[proxy] TCP write error:`, e);
+        console.error(`[proxy] TCP write error at ${elapsed()}:`, e);
         server.close(1011, "TCP write error");
       }
     });
@@ -132,8 +142,10 @@ export default {
       tcpSocket.close();
     });
 
-    // Start TCP->WS pump
-    tcpToWs();
+    // Start TCP->WS pump — ctx.waitUntil keeps the execution context alive
+    // until the TCP read loop completes; without this the runtime may GC the
+    // context after fetch() returns, killing the TCP socket.
+    ctx.waitUntil(tcpToWs());
 
     return new Response(null, { status: 101, webSocket: client });
   },
