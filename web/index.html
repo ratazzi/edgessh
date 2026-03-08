@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZeroSSH</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Connection Panel -->
+      <div id="connect-panel">
+        <div class="panel-inner">
+          <header class="brand">
+            <div class="brand-mark">&gt;_</div>
+            <h1>ZeroSSH</h1>
+            <p class="tagline">Browser-native SSH terminal</p>
+          </header>
+
+          <form id="connect-form" autocomplete="off">
+            <div class="field-row">
+              <div class="field" style="flex: 3">
+                <label for="host">HOST</label>
+                <input
+                  type="text"
+                  id="host"
+                  placeholder="192.168.1.1"
+                  required
+                />
+              </div>
+              <div class="field" style="flex: 1">
+                <label for="port">PORT</label>
+                <input type="number" id="port" value="22" required />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="username">USER</label>
+              <input type="text" id="username" placeholder="root" required />
+            </div>
+
+            <div class="field">
+              <label>AUTH</label>
+              <div class="auth-toggle">
+                <button
+                  type="button"
+                  class="toggle-btn active"
+                  data-auth="password"
+                >
+                  Password
+                </button>
+                <button type="button" class="toggle-btn" data-auth="key">
+                  Private Key
+                </button>
+              </div>
+            </div>
+
+            <div class="field" id="password-field">
+              <label for="password">PASSWORD</label>
+              <input type="password" id="password" />
+            </div>
+
+            <div class="field hidden" id="key-field">
+              <label for="private-key">PRIVATE KEY (PEM)</label>
+              <textarea
+                id="private-key"
+                rows="4"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+              ></textarea>
+            </div>
+
+            <div class="field hidden" id="passphrase-field">
+              <label for="passphrase">KEY PASSPHRASE</label>
+              <input type="password" id="passphrase" placeholder="optional" />
+            </div>
+
+            <div class="field">
+              <label for="proxy-url">PROXY URL</label>
+              <input
+                type="text"
+                id="proxy-url"
+                placeholder="wss://proxy.example.com"
+                required
+              />
+            </div>
+
+            <button type="submit" id="connect-btn">
+              <span class="btn-text">Connect</span>
+              <span class="btn-spinner hidden"></span>
+            </button>
+
+            <div id="error-msg" class="hidden"></div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Terminal Container -->
+      <div id="terminal-container" class="hidden">
+        <div id="terminal"></div>
+        <div id="status-bar">
+          <span id="status-indicator"></span>
+          <span id="status-text">Disconnected</span>
+          <span class="spacer"></span>
+          <button id="disconnect-btn" class="hidden">Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
