@@ -1237,12 +1237,21 @@ impl Session {
         let mut opening_cipher = Box::new(clear::Key) as Box<dyn OpeningKey + Send>;
         std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
 
+        let keepalive_timer =
+            crate::future_or_pending(self.common.config.keepalive_interval, russh_util::time::sleep);
+        pin!(keepalive_timer);
+
+        let inactivity_timer =
+            crate::future_or_pending(self.common.config.inactivity_timeout, russh_util::time::sleep);
+        pin!(inactivity_timer);
+
         let reading = start_reading(stream_read, buffer, opening_cipher);
         pin!(reading);
 
         #[allow(clippy::panic)]
         while !self.common.disconnected {
             self.common.received_data = false;
+            let mut sent_keepalive = false;
             tokio::select! {
                 r = &mut reading => {
                     let (stream_read, mut buffer, mut opening_cipher) = match r {
@@ -1271,6 +1280,19 @@ impl Session {
 
                     std::mem::swap(&mut opening_cipher, &mut self.common.remote_to_local);
                     reading.set(start_reading(stream_read, buffer, opening_cipher));
+                }
+                () = &mut keepalive_timer => {
+                    self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                    if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
+                        debug!("Timeout, server not responding to keepalives");
+                        return Err(crate::Error::KeepaliveTimeout.into());
+                    }
+                    sent_keepalive = true;
+                    self.send_keepalive(true)?;
+                }
+                () = &mut inactivity_timer => {
+                    debug!("timeout");
+                    return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.kex.active() => {
                     match msg {
@@ -1312,6 +1334,21 @@ impl Session {
                         .init_compress(self.common.packet_writer.compress());
                     enc.state = EncryptedState::Authenticated;
                 }
+            }
+
+            if self.common.received_data {
+                self.common.alive_timeouts = 0;
+            }
+            // Reset timers by recreating futures (wasm32 has no Sleep::reset)
+            if self.common.received_data || sent_keepalive {
+                keepalive_timer.set(
+                    crate::future_or_pending(self.common.config.keepalive_interval, russh_util::time::sleep)
+                );
+            }
+            if !sent_keepalive {
+                inactivity_timer.set(
+                    crate::future_or_pending(self.common.config.inactivity_timeout, russh_util::time::sleep)
+                );
             }
         }
 

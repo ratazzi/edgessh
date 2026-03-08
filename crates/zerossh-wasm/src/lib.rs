@@ -44,9 +44,9 @@ impl SshClient {
         on_data: js_sys::Function,
     ) -> Result<SshClient, JsValue> {
         let config = Arc::new(client::Config {
-            // On wasm32, set timeouts to None (no timer support)
             inactivity_timeout: None,
-            keepalive_interval: None,
+            keepalive_interval: Some(std::time::Duration::from_secs(30)),
+            keepalive_max: 6,
             ..Default::default()
         });
 

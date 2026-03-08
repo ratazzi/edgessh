@@ -2449,6 +2449,7 @@ name = "russh-util"
 version = "0.52.0"
 dependencies = [
  "chrono",
+ "js-sys",
  "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",
