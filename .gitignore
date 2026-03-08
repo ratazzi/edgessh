@@ -6,3 +6,4 @@ pkg/
 .claude/
 *.wasm
 !web/public/*.wasm
+worker/public/
