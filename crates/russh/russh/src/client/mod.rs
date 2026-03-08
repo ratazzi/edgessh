@@ -1283,15 +1283,16 @@ impl Session {
                 }
                 () = &mut keepalive_timer => {
                     self.common.alive_timeouts = self.common.alive_timeouts.saturating_add(1);
+                    debug!("sending keepalive (attempt {})", self.common.alive_timeouts);
                     if self.common.config.keepalive_max != 0 && self.common.alive_timeouts > self.common.config.keepalive_max {
-                        debug!("Timeout, server not responding to keepalives");
+                        debug!("keepalive timeout, server not responding");
                         return Err(crate::Error::KeepaliveTimeout.into());
                     }
                     sent_keepalive = true;
                     self.send_keepalive(true)?;
                 }
                 () = &mut inactivity_timer => {
-                    debug!("timeout");
+                    debug!("inactivity timeout");
                     return Err(crate::Error::InactivityTimeout.into());
                 }
                 msg = self.receiver.recv(), if !self.kex.active() => {

@@ -17,6 +17,7 @@ send_wrapper = "0.6"
 tokio = { version = "1", features = ["io-util", "sync"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 log = "0.4"
+console_log = "1"
 web-sys = { version = "0.3", features = ["console"] }
 js-sys = "0.3"
 thiserror = "1"

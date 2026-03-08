@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use handler::{SshError, SshHandler};
 use russh::client::{self, Handle};
+use russh::ChannelWriteHalf;
 use russh::keys::decode_secret_key;
 use russh::keys::key::PrivateKeyWithHashAlg;
-use russh::Channel;
 use send_wrapper::SendWrapper;
 use transport::WsTransport;
 use wasm_bindgen::prelude::*;
@@ -18,7 +18,7 @@ use ws_stream_wasm::WsMeta;
 #[wasm_bindgen]
 pub struct SshClient {
     handle: SendWrapper<Handle<SshHandler>>,
-    channel: SendWrapper<Channel<client::Msg>>,
+    channel: SendWrapper<ChannelWriteHalf<client::Msg>>,
 }
 
 #[wasm_bindgen]
@@ -43,6 +43,9 @@ impl SshClient {
         rows: u32,
         on_data: js_sys::Function,
     ) -> Result<SshClient, JsValue> {
+        // Initialize console logger (idempotent, second call is no-op)
+        let _ = console_log::init_with_level(log::Level::Info);
+
         let config = Arc::new(client::Config {
             inactivity_timeout: None,
             keepalive_interval: Some(std::time::Duration::from_secs(30)),
@@ -96,21 +99,33 @@ impl SshClient {
             .await
             .map_err(|e| JsValue::from_str(&format!("Channel open failed: {e}")))?;
 
+        // Split channel: we only need the write half for sending data/resize.
+        // The read half must be drained to prevent the bounded channel buffer
+        // from filling up, which would block the SSH event loop.
+        let (mut read_half, write_half) = channel.split();
+
+        // Spawn background task to drain channel read buffer
+        wasm_bindgen_futures::spawn_local(async move {
+            while read_half.wait().await.is_some() {
+                // Discard — data is delivered via Handler::data() callback
+            }
+        });
+
         // Request PTY
-        channel
+        write_half
             .request_pty(false, "xterm-256color", cols, rows, 0, 0, &[])
             .await
             .map_err(|e| JsValue::from_str(&format!("PTY request failed: {e}")))?;
 
         // Request shell
-        channel
+        write_half
             .request_shell(true)
             .await
             .map_err(|e| JsValue::from_str(&format!("Shell request failed: {e}")))?;
 
         Ok(SshClient {
             handle: SendWrapper::new(handle),
-            channel: SendWrapper::new(channel),
+            channel: SendWrapper::new(write_half),
         })
     }
 
@@ -132,6 +147,12 @@ impl SshClient {
             .await
             .map_err(|e| JsValue::from_str(&format!("Resize failed: {e}")))?;
         Ok(())
+    }
+
+    /// Check if the SSH connection is still alive.
+    #[wasm_bindgen]
+    pub fn is_connected(&self) -> bool {
+        !self.handle.is_closed()
     }
 
     /// Disconnect the SSH session.
