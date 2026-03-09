@@ -1,9 +1,10 @@
 import "./style.css";
 import "@xterm/xterm/css/xterm.css";
-import init, { SshClient } from "zerossh-wasm";
+import { WsProxyProvider, type Connection, type ServerConfig } from "./transport";
 import { TerminalUI } from "./terminal";
 
-let client: SshClient | null = null;
+const provider = new WsProxyProvider();
+let connection: Connection | null = null;
 let terminalUI: TerminalUI | null = null;
 let connectionCheckTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -103,10 +104,6 @@ async function handleConnect(e: Event): Promise<void> {
       .value;
   }
 
-  // Build WebSocket URL (same origin)
-  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProto}//${location.host}/proxy?host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`;
-
   // Create terminal
   terminalUI = new TerminalUI(terminalEl);
   terminalUI.open();
@@ -114,46 +111,39 @@ async function handleConnect(e: Event): Promise<void> {
   const cols = terminalUI.cols;
   const rows = terminalUI.rows;
 
+  const config: ServerConfig = {
+    host,
+    port: parseInt(port, 10),
+    username,
+    authType: authType as "password" | "key",
+    credential,
+    passphrase,
+    cols,
+    rows,
+  };
+
   try {
-    // Initialize WASM
-    await init();
+    connection = await provider.connect(config);
 
-    // Data callback: write SSH output to terminal
-    const onData = (data: Uint8Array) => {
+    const encoder = new TextEncoder();
+
+    connection.onData((data) => {
       terminalUI?.write(data);
-    };
-
-    // Connect SSH
-    client = await SshClient.connect(
-      wsUrl,
-      username,
-      authType,
-      credential,
-      passphrase,
-      cols,
-      rows,
-      onData,
-    );
-
-    // Terminal input -> SSH (await to detect send failures)
-    terminalUI.onData((data: string) => {
-      const encoder = new TextEncoder();
-      client?.send_data(encoder.encode(data)).catch(() => {
-        handleDisconnect();
-      });
     });
 
-    // Terminal resize -> SSH
+    terminalUI.onData((data: string) => {
+      connection?.send(encoder.encode(data));
+    });
+
     terminalUI.onResize((size) => {
-      client?.resize(size.cols, size.rows);
+      connection?.resize?.(size.cols, size.rows);
     });
 
     setStatus(true, `${username}@${host}:${port}`);
     showTerminal();
 
-    // Poll connection health every 3 seconds
     connectionCheckTimer = setInterval(() => {
-      if (client && !client.is_connected()) {
+      if (connection && !(connection.isConnected?.() ?? true)) {
         console.warn("[zerossh] connection lost (detected by health check)");
         handleDisconnect();
       }
@@ -173,19 +163,9 @@ async function handleDisconnect(): Promise<void> {
     clearInterval(connectionCheckTimer);
     connectionCheckTimer = null;
   }
-  // Try graceful disconnect with a timeout — if the event loop is stuck,
-  // the disconnect call will hang, so we race it with a 2s timer.
-  if (client) {
-    try {
-      await Promise.race([
-        client.disconnect(),
-        new Promise((r) => setTimeout(r, 2000)),
-      ]);
-    } catch {
-      // ignore disconnect errors
-    }
-    client.free();
-    client = null;
+  if (connection) {
+    await connection.close();
+    connection = null;
   }
   terminalUI?.dispose();
   terminalUI = null;
