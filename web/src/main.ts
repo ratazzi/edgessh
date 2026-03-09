@@ -42,6 +42,7 @@ const keyField = document.getElementById("key-field")!;
 const passphraseField = document.getElementById("passphrase-field")!;
 
 let authType = "password";
+let authMode: "self-deploy" | "demo" = "self-deploy";
 
 toggleBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -89,6 +90,7 @@ function showDashboard(): void {
   terminalContainer.classList.add("hidden");
   connectModal.classList.add("hidden");
   dashboard.classList.remove("hidden");
+  document.getElementById("demo-banner")!.classList.toggle("hidden", authMode !== "demo");
   setStatus(false, "Disconnected");
 }
 
@@ -283,6 +285,7 @@ async function initApp(): Promise<void> {
   }
 
   authLoading.classList.add("hidden");
+  authMode = status.mode;
 
   if (status.authenticated) {
     await onAuthenticated();
