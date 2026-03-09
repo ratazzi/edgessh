@@ -7,134 +7,134 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
       rel="stylesheet"
     />
   </head>
-  <body>
-    <div id="app">
+  <body class="bg-slate-50 text-slate-700 font-sans text-sm">
+    <div id="app" class="h-full flex flex-col">
       <!-- Auth Screen -->
-      <div id="auth-screen" class="hidden">
-        <div class="panel-inner">
-          <header class="brand">
-            <div class="brand-mark">&gt;_</div>
-            <h1>ZeroSSH</h1>
-            <p class="tagline">Browser-native SSH terminal</p>
+      <div id="auth-screen" class="hidden flex items-center justify-center min-h-screen p-8 animate-fade-in bg-gradient-to-br from-slate-50 via-white to-emerald-50/40">
+        <div class="w-full max-w-sm">
+          <header class="mb-10 text-center">
+            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-600 text-white font-display text-xl font-bold mb-5 shadow-lg shadow-emerald-600/20">&gt;_</div>
+            <h1 class="font-display text-2xl font-bold text-slate-900 -tracking-wide">ZeroSSH</h1>
+            <p class="text-slate-400 text-xs mt-2 tracking-widest uppercase">Browser-native SSH terminal</p>
           </header>
 
-          <div id="auth-content">
-            <div id="auth-loading" class="auth-msg">Checking authentication...</div>
-            <div id="auth-actions" class="hidden">
-              <button id="register-btn" class="auth-btn hidden">
+          <div id="auth-content" class="flex flex-col gap-4">
+            <div id="auth-loading" class="text-slate-400 text-sm text-center">Checking authentication...</div>
+            <div id="auth-actions" class="hidden flex flex-col gap-3">
+              <button id="register-btn" class="hidden btn-primary flex items-center justify-center gap-2 w-full">
                 <span class="btn-text">Register Passkey</span>
                 <span class="btn-spinner hidden"></span>
               </button>
-              <button id="login-btn" class="auth-btn hidden">
+              <button id="login-btn" class="hidden btn-primary flex items-center justify-center gap-2 w-full">
                 <span class="btn-text">Login with Passkey</span>
                 <span class="btn-spinner hidden"></span>
               </button>
-              <div id="turnstile-container" class="hidden"></div>
+              <div id="turnstile-container" class="hidden flex justify-center"></div>
             </div>
-            <div id="auth-error" class="hidden"></div>
+            <div id="auth-error" class="hidden bg-red-50 border border-red-200 rounded-md text-red-600 text-sm py-2.5 px-3.5 leading-relaxed"></div>
           </div>
         </div>
       </div>
 
-      <!-- Connection Panel -->
-      <div id="connect-panel" class="hidden">
-        <div class="panel-inner">
-          <header class="brand">
-            <div class="brand-mark">&gt;_</div>
-            <h1>ZeroSSH</h1>
-            <p class="tagline">Browser-native SSH terminal</p>
-          </header>
-
-          <div id="server-list-section" class="hidden">
-            <div class="section-label">SAVED SERVERS</div>
-            <div class="server-list"></div>
+      <!-- Dashboard -->
+      <div id="dashboard" class="hidden flex flex-col min-h-screen animate-fade-in">
+        <header class="flex items-center justify-between px-6 md:px-10 py-4 bg-white border-b border-slate-200">
+          <div class="flex items-center gap-2.5">
+            <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-600 text-white font-display text-xs font-bold">&gt;_</div>
+            <span class="font-display text-base font-bold text-slate-900 -tracking-wide">ZeroSSH</span>
           </div>
+          <button id="logout-btn" class="text-slate-400 font-sans text-xs font-medium cursor-pointer transition-colors hover:text-slate-600 bg-transparent border-none">Logout</button>
+        </header>
+        <div class="flex-1 px-6 md:px-10 py-6">
+          <div id="server-grid" class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4"></div>
+          <div id="empty-state" class="hidden text-center text-slate-400 text-sm pt-20 pb-4 leading-relaxed">
+            <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-slate-100 text-slate-300 text-xl mb-4">?</div>
+            <p class="font-medium text-slate-500">No saved servers</p>
+            <p class="mt-1">Click <strong class="text-emerald-600">+</strong> to add your first connection.</p>
+          </div>
+        </div>
+      </div>
 
-          <form id="connect-form" autocomplete="off">
-            <div class="field-row">
-              <div class="field" style="flex: 3">
-                <label for="host">HOST</label>
-                <input
-                  type="text"
-                  id="host"
-                  placeholder="192.168.1.1"
-                  required
-                />
+      <!-- Connect Modal -->
+      <div id="connect-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="modal-backdrop fixed inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+        <div class="relative z-10 bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 shadow-2xl">
+          <div class="flex items-center justify-between mb-5">
+            <h2 class="font-sans text-base font-semibold text-slate-900">New Connection</h2>
+            <button class="bg-transparent border-none text-slate-400 text-xl cursor-pointer w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-slate-100 hover:text-slate-600" id="modal-close-btn">&times;</button>
+          </div>
+          <form id="connect-form" class="flex flex-col gap-4" autocomplete="off">
+            <div class="flex flex-col gap-1.5">
+              <label for="conn-name" class="form-label">NAME</label>
+              <input type="text" id="conn-name" placeholder="My Server (optional)" class="form-input" />
+            </div>
+
+            <div class="flex gap-3">
+              <div class="flex flex-col gap-1.5 flex-[3]">
+                <label for="host" class="form-label">HOST</label>
+                <input type="text" id="host" placeholder="192.168.1.1" required class="form-input" />
               </div>
-              <div class="field" style="flex: 1">
-                <label for="port">PORT</label>
-                <input type="number" id="port" value="22" required />
+              <div class="flex flex-col gap-1.5 flex-1 min-w-0">
+                <label for="port" class="form-label">PORT</label>
+                <input type="number" id="port" value="22" required class="form-input min-w-0" />
               </div>
             </div>
 
-            <div class="field">
-              <label for="username">USER</label>
-              <input type="text" id="username" placeholder="root" required />
+            <div class="flex flex-col gap-1.5">
+              <label for="username" class="form-label">USER</label>
+              <input type="text" id="username" placeholder="root" required class="form-input" />
             </div>
 
-            <div class="field">
-              <label>AUTH</label>
+            <div class="flex flex-col gap-1.5">
+              <label class="form-label">AUTH</label>
               <div class="auth-toggle">
-                <button
-                  type="button"
-                  class="toggle-btn active"
-                  data-auth="password"
-                >
-                  Password
-                </button>
-                <button type="button" class="toggle-btn" data-auth="key">
-                  Private Key
-                </button>
+                <button type="button" class="toggle-btn active" data-auth="password">Password</button>
+                <button type="button" class="toggle-btn" data-auth="key">Private Key</button>
               </div>
             </div>
 
-            <div class="field" id="password-field">
-              <label for="password">PASSWORD</label>
-              <input type="password" id="password" />
+            <div class="flex flex-col gap-1.5" id="password-field">
+              <label for="password" class="form-label">PASSWORD</label>
+              <input type="password" id="password" class="form-input" />
             </div>
 
-            <div class="field hidden" id="key-field">
-              <label for="private-key">PRIVATE KEY (PEM)</label>
-              <textarea
-                id="private-key"
-                rows="4"
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-              ></textarea>
+            <div class="flex flex-col gap-1.5 hidden" id="key-field">
+              <label for="private-key" class="form-label">PRIVATE KEY (PEM)</label>
+              <textarea id="private-key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" class="form-input resize-y min-h-20 leading-relaxed"></textarea>
             </div>
 
-            <div class="field hidden" id="passphrase-field">
-              <label for="passphrase">KEY PASSPHRASE</label>
-              <input type="password" id="passphrase" placeholder="optional" />
+            <div class="flex flex-col gap-1.5 hidden" id="passphrase-field">
+              <label for="passphrase" class="form-label">KEY PASSPHRASE</label>
+              <input type="password" id="passphrase" placeholder="optional" class="form-input" />
             </div>
 
-            <div class="checkbox-field">
-              <input type="checkbox" id="save-server" />
-              <label for="save-server">Save this server</label>
+            <div class="flex items-center gap-2.5">
+              <input type="checkbox" id="save-server" checked class="accent-emerald-600 w-3.5 h-3.5 rounded" />
+              <label for="save-server" class="text-xs text-slate-500 cursor-pointer">Save this server</label>
             </div>
 
-            <button type="submit" id="connect-btn">
+            <button type="submit" id="connect-btn" class="btn-primary mt-1 w-full">
               <span class="btn-text">Connect</span>
               <span class="btn-spinner hidden"></span>
             </button>
 
-            <div id="error-msg" class="hidden"></div>
+            <div id="error-msg" class="hidden bg-red-50 border border-red-200 rounded-md text-red-600 text-sm py-2.5 px-3.5 leading-relaxed"></div>
           </form>
         </div>
       </div>
 
       <!-- Terminal Container -->
-      <div id="terminal-container" class="hidden">
-        <div id="terminal"></div>
-        <div id="status-bar">
-          <span id="status-indicator"></span>
-          <span id="status-text">Disconnected</span>
-          <span class="spacer"></span>
-          <button id="disconnect-btn" class="hidden">Disconnect</button>
-          <button id="logout-btn">Logout</button>
+      <div id="terminal-container" class="hidden flex-1 flex flex-col animate-[fade-in_0.3s_ease]">
+        <div id="terminal" class="flex-1 bg-slate-950 p-1"></div>
+        <div id="status-bar" class="flex items-center gap-2 bg-white border-t border-slate-200 px-4 py-2 text-xs text-slate-500">
+          <span id="status-indicator" class="w-2 h-2 rounded-full bg-slate-300 transition-all"></span>
+          <span id="status-text" class="font-mono">Disconnected</span>
+          <span class="flex-1"></span>
+          <button id="disconnect-btn" class="hidden text-slate-400 font-sans text-xs font-medium cursor-pointer transition-colors hover:text-red-500 bg-transparent border-none">Disconnect</button>
         </div>
       </div>
     </div>

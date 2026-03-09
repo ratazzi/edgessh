@@ -19,7 +19,11 @@ const registerBtn = document.getElementById("register-btn") as HTMLButtonElement
 const loginBtn = document.getElementById("login-btn") as HTMLButtonElement;
 const turnstileContainer = document.getElementById("turnstile-container")!;
 
-const connectPanel = document.getElementById("connect-panel")!;
+const dashboard = document.getElementById("dashboard")!;
+const serverGrid = document.getElementById("server-grid")!;
+const emptyState = document.getElementById("empty-state")!;
+
+const connectModal = document.getElementById("connect-modal")!;
 const connectForm = document.getElementById("connect-form") as HTMLFormElement;
 const terminalContainer = document.getElementById("terminal-container")!;
 const terminalEl = document.getElementById("terminal")!;
@@ -66,35 +70,36 @@ function setConnecting(loading: boolean): void {
 }
 
 function setStatus(connected: boolean, text: string): void {
-  statusIndicator.classList.toggle("connected", connected);
+  statusIndicator.className = connected
+    ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_theme(--color-emerald-500)] transition-all"
+    : "w-2 h-2 rounded-full bg-slate-300 transition-all";
   statusText.textContent = text;
   disconnectBtn.classList.toggle("hidden", !connected);
 }
 
 function showAuthScreen(): void {
   authScreen.classList.remove("hidden");
-  connectPanel.classList.add("hidden");
+  dashboard.classList.add("hidden");
+  connectModal.classList.add("hidden");
   terminalContainer.classList.add("hidden");
 }
 
-function showConnectPanel(): void {
+function showDashboard(): void {
   authScreen.classList.add("hidden");
   terminalContainer.classList.add("hidden");
-  connectPanel.classList.remove("hidden", "slide-out");
-  setConnecting(false);
+  connectModal.classList.add("hidden");
+  dashboard.classList.remove("hidden");
   setStatus(false, "Disconnected");
 }
 
 function showTerminal(): void {
-  connectPanel.classList.add("slide-out");
-  setTimeout(() => {
-    connectPanel.classList.add("hidden");
-    terminalContainer.classList.remove("hidden");
-    if (terminalUI) {
-      terminalUI.fit();
-      terminalUI.focus();
-    }
-  }, 350);
+  dashboard.classList.add("hidden");
+  connectModal.classList.add("hidden");
+  terminalContainer.classList.remove("hidden");
+  if (terminalUI) {
+    terminalUI.fit();
+    terminalUI.focus();
+  }
 }
 
 function showAuthError(msg: string): void {
@@ -119,78 +124,148 @@ function setAuthBtnLoading(btn: HTMLButtonElement, loading: boolean): void {
   }
 }
 
-function fillFormFromServer(server: SavedServer): void {
-  (document.getElementById("host") as HTMLInputElement).value = server.host;
-  (document.getElementById("port") as HTMLInputElement).value = String(server.port);
-  (document.getElementById("username") as HTMLInputElement).value = server.username;
-
-  // Set auth type
-  authType = server.authType;
-  toggleBtns.forEach((b) => {
-    b.classList.toggle("active", b.dataset.auth === authType);
-  });
-  passwordField.classList.toggle("hidden", authType !== "password");
-  keyField.classList.toggle("hidden", authType !== "key");
-  passphraseField.classList.toggle("hidden", authType !== "key");
-
-  // Fill credentials
-  if (authType === "password") {
-    (document.getElementById("password") as HTMLInputElement).value = server.credential;
-  } else {
-    (document.getElementById("private-key") as HTMLTextAreaElement).value = server.credential;
-    (document.getElementById("passphrase") as HTMLInputElement).value = server.passphrase ?? "";
-  }
+// Modal open/close
+function openModal(): void {
+  connectForm.reset();
+  authType = "password";
+  toggleBtns.forEach((b) => b.classList.toggle("active", b.dataset.auth === "password"));
+  passwordField.classList.remove("hidden");
+  keyField.classList.add("hidden");
+  passphraseField.classList.add("hidden");
+  hideError();
+  setConnecting(false);
+  connectModal.classList.remove("hidden");
 }
 
-// Server list
-function renderServerList(servers: SavedServer[]): void {
-  const section = document.getElementById("server-list-section");
-  if (!section) return;
+function closeModal(): void {
+  connectModal.classList.add("hidden");
+}
 
-  const list = section.querySelector(".server-list")!;
-  list.innerHTML = "";
+// Dashboard rendering
+function renderDashboard(servers: SavedServer[]): void {
+  serverGrid.innerHTML = "";
 
-  if (servers.length === 0) {
-    section.classList.add("hidden");
-    return;
-  }
-
-  section.classList.remove("hidden");
   for (let i = 0; i < servers.length; i++) {
     const server = servers[i];
-    const item = document.createElement("div");
-    item.className = "server-item";
+    const card = document.createElement("div");
+    card.className = "relative bg-white border border-slate-200 rounded-lg p-4 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-300 group";
 
-    const info = document.createElement("span");
-    info.className = "server-info";
-    info.textContent = `${server.username}@${server.host}:${server.port}`;
-    info.addEventListener("click", () => fillFormFromServer(server));
+    const title = document.createElement("div");
+    title.className = "font-sans text-sm font-semibold text-slate-800 mb-1 pr-6";
+    title.textContent = server.name || `${server.username}@${server.host}:${server.port}`;
+    card.appendChild(title);
+
+    if (server.name) {
+      const subtitle = document.createElement("div");
+      subtitle.className = "font-mono text-xs text-slate-400 mb-2";
+      subtitle.textContent = `${server.username}@${server.host}:${server.port}`;
+      card.appendChild(subtitle);
+    }
+
+    const badge = document.createElement("span");
+    if (server.authType === "password") {
+      badge.className = "inline-block text-[0.6rem] font-semibold bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 tracking-wide uppercase";
+      badge.textContent = "Password";
+    } else {
+      badge.className = "inline-block text-[0.6rem] font-semibold bg-sky-50 text-sky-700 border border-sky-200 rounded px-1.5 py-0.5 tracking-wide uppercase";
+      badge.textContent = "Key";
+    }
+    card.appendChild(badge);
 
     const removeBtn = document.createElement("button");
-    removeBtn.className = "server-remove";
+    removeBtn.className = "absolute top-3 right-3 bg-transparent border-none text-slate-300 text-base cursor-pointer w-6 h-6 flex items-center justify-center rounded transition-all opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500";
     removeBtn.title = "Remove";
     removeBtn.textContent = "\u00d7";
-    removeBtn.addEventListener("click", async () => {
+    removeBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       const updated = servers.filter((_, idx) => idx !== i);
       await saveServers(updated);
-      renderServerList(updated);
+      renderDashboard(updated);
+    });
+    card.appendChild(removeBtn);
+
+    card.addEventListener("click", () => connectToServer(server, card));
+    serverGrid.appendChild(card);
+  }
+
+  // "+" New Connection card
+  const newCard = document.createElement("div");
+  newCard.className = "flex flex-col items-center justify-center gap-2 bg-transparent border-2 border-dashed border-slate-200 rounded-lg p-4 cursor-pointer transition-all duration-200 text-slate-400 min-h-[88px] hover:border-emerald-400 hover:bg-emerald-50/50 hover:text-emerald-600";
+  newCard.innerHTML = `<span class="text-2xl leading-none font-light">+</span><span class="text-xs font-medium">New Connection</span>`;
+  newCard.addEventListener("click", openModal);
+  serverGrid.appendChild(newCard);
+
+  emptyState.classList.toggle("hidden", servers.length > 0);
+}
+
+// Direct connect from a saved server card
+async function connectToServer(server: SavedServer, card: HTMLElement): Promise<void> {
+  card.classList.add("connecting");
+  card.querySelector(".card-error")?.remove();
+
+  terminalUI = new TerminalUI(terminalEl);
+  terminalUI.open();
+
+  const config: ServerConfig = {
+    host: server.host,
+    port: server.port,
+    username: server.username,
+    authType: server.authType,
+    credential: server.credential,
+    passphrase: server.passphrase ?? "",
+    cols: terminalUI.cols,
+    rows: terminalUI.rows,
+  };
+
+  try {
+    connection = await provider.connect(config);
+
+    const encoder = new TextEncoder();
+
+    connection.onData((data) => {
+      terminalUI?.write(data);
     });
 
-    item.appendChild(info);
-    item.appendChild(removeBtn);
-    list.appendChild(item);
+    terminalUI.onData((data: string) => {
+      connection?.send(encoder.encode(data));
+    });
+
+    terminalUI.onResize((size) => {
+      connection?.resize?.(size.cols, size.rows);
+    });
+
+    setStatus(true, `${server.username}@${server.host}:${server.port}`);
+    showTerminal();
+
+    connectionCheckTimer = setInterval(() => {
+      if (connection && !(connection.isConnected?.() ?? true)) {
+        console.warn("[zerossh] connection lost (detected by health check)");
+        handleDisconnect();
+      }
+    }, 3000);
+  } catch (err) {
+    terminalUI.dispose();
+    terminalUI = null;
+    terminalEl.innerHTML = "";
+    card.classList.remove("connecting");
+
+    const errEl = document.createElement("div");
+    errEl.className = "card-error text-xs text-red-500 mt-2";
+    errEl.textContent = err instanceof Error ? err.message : String(err);
+    card.appendChild(errEl);
+
+    setTimeout(() => errEl.remove(), 4000);
   }
 }
 
 async function onAuthenticated(): Promise<void> {
-  showConnectPanel();
+  showDashboard();
 
-  // Load saved servers
   try {
     const servers = await loadServers();
-    renderServerList(servers);
+    renderDashboard(servers);
   } catch {
-    // ignore
+    renderDashboard([]);
   }
 }
 
@@ -217,12 +292,10 @@ async function initApp(): Promise<void> {
   authActions.classList.remove("hidden");
 
   if (status.mode === "demo") {
-    // Demo mode: show Turnstile widget
     turnstileContainer.classList.remove("hidden");
     if (status.turnstileSiteKey) {
       loadTurnstile(status.turnstileSiteKey);
     } else {
-      // No Turnstile configured, just create demo session directly
       try {
         await loginDemo("");
         await onAuthenticated();
@@ -231,10 +304,8 @@ async function initApp(): Promise<void> {
       }
     }
   } else if (status.registered) {
-    // Self-deploy: already registered, show login
     loginBtn.classList.remove("hidden");
   } else {
-    // Self-deploy: not registered, show register
     registerBtn.classList.remove("hidden");
   }
 }
@@ -291,6 +362,7 @@ async function handleConnect(e: Event): Promise<void> {
   hideError();
   setConnecting(true);
 
+  const connName = (document.getElementById("conn-name") as HTMLInputElement).value.trim();
   const host = (document.getElementById("host") as HTMLInputElement).value;
   const port = (document.getElementById("port") as HTMLInputElement).value;
   const username = (document.getElementById("username") as HTMLInputElement).value;
@@ -305,7 +377,6 @@ async function handleConnect(e: Event): Promise<void> {
     passphrase = (document.getElementById("passphrase") as HTMLInputElement).value;
   }
 
-  // Create terminal
   terminalUI = new TerminalUI(terminalEl);
   terminalUI.open();
 
@@ -341,11 +412,12 @@ async function handleConnect(e: Event): Promise<void> {
     });
 
     setStatus(true, `${username}@${host}:${port}`);
+    closeModal();
     showTerminal();
 
     // Save server if checkbox is checked
-    const saveCheckbox = document.getElementById("save-server") as HTMLInputElement | null;
-    if (saveCheckbox?.checked) {
+    const saveCheckbox = document.getElementById("save-server") as HTMLInputElement;
+    if (saveCheckbox.checked) {
       try {
         const servers = await loadServers();
         const exists = servers.some(
@@ -353,6 +425,7 @@ async function handleConnect(e: Event): Promise<void> {
         );
         if (!exists) {
           servers.push({
+            name: connName || undefined,
             host,
             port: parseInt(port),
             username,
@@ -361,7 +434,6 @@ async function handleConnect(e: Event): Promise<void> {
             passphrase: passphrase || undefined,
           });
           await saveServers(servers);
-          renderServerList(servers);
         }
       } catch {
         // ignore save error
@@ -396,14 +468,30 @@ async function handleDisconnect(): Promise<void> {
   terminalUI?.dispose();
   terminalUI = null;
   terminalEl.innerHTML = "";
-  showConnectPanel();
+
+  showDashboard();
+  try {
+    const servers = await loadServers();
+    renderDashboard(servers);
+  } catch {
+    renderDashboard([]);
+  }
 }
 
 // Event listeners
 connectForm.addEventListener("submit", handleConnect);
 disconnectBtn.addEventListener("click", handleDisconnect);
 
-// Logout from status bar
+// Modal close handlers
+document.getElementById("modal-close-btn")!.addEventListener("click", closeModal);
+connectModal.querySelector(".modal-backdrop")!.addEventListener("click", closeModal);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !connectModal.classList.contains("hidden")) {
+    closeModal();
+  }
+});
+
+// Logout from dashboard header
 const logoutBtn = document.getElementById("logout-btn");
 if (logoutBtn) {
   logoutBtn.addEventListener("click", async () => {

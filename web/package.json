@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@simplewebauthn/browser": "^11.0.0",
+    "@tailwindcss/vite": "^4.2.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
+    "tailwindcss": "^4.2.1",
     "ws": "^8.19.0",
     "zerossh-wasm": "file:../crates/zerossh-wasm/pkg"
   },
