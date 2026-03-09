@@ -13,14 +13,46 @@
   </head>
   <body>
     <div id="app">
-      <!-- Connection Panel -->
-      <div id="connect-panel">
+      <!-- Auth Screen -->
+      <div id="auth-screen" class="hidden">
         <div class="panel-inner">
           <header class="brand">
             <div class="brand-mark">&gt;_</div>
             <h1>ZeroSSH</h1>
             <p class="tagline">Browser-native SSH terminal</p>
           </header>
+
+          <div id="auth-content">
+            <div id="auth-loading" class="auth-msg">Checking authentication...</div>
+            <div id="auth-actions" class="hidden">
+              <button id="register-btn" class="auth-btn hidden">
+                <span class="btn-text">Register Passkey</span>
+                <span class="btn-spinner hidden"></span>
+              </button>
+              <button id="login-btn" class="auth-btn hidden">
+                <span class="btn-text">Login with Passkey</span>
+                <span class="btn-spinner hidden"></span>
+              </button>
+              <div id="turnstile-container" class="hidden"></div>
+            </div>
+            <div id="auth-error" class="hidden"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connection Panel -->
+      <div id="connect-panel" class="hidden">
+        <div class="panel-inner">
+          <header class="brand">
+            <div class="brand-mark">&gt;_</div>
+            <h1>ZeroSSH</h1>
+            <p class="tagline">Browser-native SSH terminal</p>
+          </header>
+
+          <div id="server-list-section" class="hidden">
+            <div class="section-label">SAVED SERVERS</div>
+            <div class="server-list"></div>
+          </div>
 
           <form id="connect-form" autocomplete="off">
             <div class="field-row">
@@ -79,6 +111,11 @@
               <input type="password" id="passphrase" placeholder="optional" />
             </div>
 
+            <div class="checkbox-field">
+              <input type="checkbox" id="save-server" />
+              <label for="save-server">Save this server</label>
+            </div>
+
             <button type="submit" id="connect-btn">
               <span class="btn-text">Connect</span>
               <span class="btn-spinner hidden"></span>
@@ -97,6 +134,7 @@
           <span id="status-text">Disconnected</span>
           <span class="spacer"></span>
           <button id="disconnect-btn" class="hidden">Disconnect</button>
+          <button id="logout-btn">Logout</button>
         </div>
       </div>
     </div>
