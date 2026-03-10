@@ -3767,6 +3767,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "zerossh-do"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "internal-russh-forked-ssh-key",
+ "js-sys",
+ "log",
+ "russh",
+ "send_wrapper",
+ "thiserror 1.0.69",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "zerossh-wasm"
 version = "0.1.0"
 dependencies = [

@@ -5,6 +5,7 @@ members = [
     "crates/russh/russh-cryptovec",
     "crates/russh/russh-util",
     "crates/zerossh-wasm",
+    "crates/zerossh-do",
 ]
 
 [workspace.dependencies]

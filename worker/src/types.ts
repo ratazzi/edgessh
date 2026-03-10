@@ -7,6 +7,7 @@ export interface Env {
   TURNSTILE_SITE_KEY?: string;
   RP_ID?: string;
   RP_ORIGIN?: string;
+  SSH_SESSION: DurableObjectNamespace;
 }
 
 export interface JwtPayload {

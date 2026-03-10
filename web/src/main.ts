@@ -1,14 +1,15 @@
 import "./style.css";
 import "@xterm/xterm/css/xterm.css";
-import { WsProxyProvider, type Connection, type ServerConfig } from "./transport";
+import { DoSessionProvider, type DoConnection, type ServerConfig, type SessionInfo } from "./transport";
 import { TerminalUI } from "./terminal";
 import { checkAuthStatus, registerPasskey, loginPasskey, loginDemo, logout, type AuthStatus } from "./auth";
 import { loadServers, saveServers, type SavedServer } from "./servers";
 
-const provider = new WsProxyProvider();
-let connection: Connection | null = null;
+const provider = new DoSessionProvider();
+let connection: DoConnection | null = null;
 let terminalUI: TerminalUI | null = null;
 let connectionCheckTimer: ReturnType<typeof setInterval> | null = null;
+let currentSessionId: string | null = null;
 
 // DOM elements
 const authScreen = document.getElementById("auth-screen")!;
@@ -70,12 +71,15 @@ function setConnecting(loading: boolean): void {
   btnSpinner.classList.toggle("hidden", !loading);
 }
 
+const terminateBtn = document.getElementById("terminate-btn");
+
 function setStatus(connected: boolean, text: string): void {
   statusIndicator.className = connected
     ? "w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_theme(--color-emerald-500)] transition-all"
     : "w-2 h-2 rounded-full bg-slate-300 transition-all";
   statusText.textContent = text;
   disconnectBtn.classList.toggle("hidden", !connected);
+  terminateBtn?.classList.toggle("hidden", !connected);
 }
 
 function showAuthScreen(): void {
@@ -141,6 +145,111 @@ function openModal(): void {
 
 function closeModal(): void {
   connectModal.classList.add("hidden");
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+// Active sessions rendering
+function renderActiveSessions(sessions: SessionInfo[]): void {
+  const container = document.getElementById("active-sessions")!;
+
+  if (sessions.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = `<h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Active Sessions</h3>`;
+
+  const grid = document.createElement("div");
+  grid.className = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4";
+
+  for (const session of sessions) {
+    const card = document.createElement("div");
+    card.className = "relative bg-emerald-50 border border-emerald-200 rounded-lg p-4 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-emerald-400 group";
+
+    const header = document.createElement("div");
+    header.className = "flex items-center gap-2 mb-1";
+
+    const liveBadge = document.createElement("span");
+    liveBadge.className = "inline-flex items-center gap-1 text-[0.6rem] font-bold bg-emerald-100 text-emerald-700 border border-emerald-300 rounded px-1.5 py-0.5 uppercase";
+    liveBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live`;
+    header.appendChild(liveBadge);
+
+    const duration = document.createElement("span");
+    duration.className = "text-[0.6rem] text-slate-400";
+    duration.textContent = formatDuration(Date.now() - session.createdAt);
+    header.appendChild(duration);
+    card.appendChild(header);
+
+    const title = document.createElement("div");
+    title.className = "font-mono text-sm font-semibold text-slate-800 pr-6";
+    title.textContent = `${session.username}@${session.host}:${session.port}`;
+    card.appendChild(title);
+
+    const terminateSessionBtn = document.createElement("button");
+    terminateSessionBtn.className = "absolute top-3 right-3 bg-transparent border-none text-slate-300 text-base cursor-pointer w-6 h-6 flex items-center justify-center rounded transition-all opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-500";
+    terminateSessionBtn.title = "Terminate";
+    terminateSessionBtn.textContent = "\u00d7";
+    terminateSessionBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await provider.terminate(session.id);
+      const updated = await provider.listSessions();
+      renderActiveSessions(updated);
+    });
+    card.appendChild(terminateSessionBtn);
+
+    card.addEventListener("click", () => reconnectSession(session));
+    grid.appendChild(card);
+  }
+
+  container.appendChild(grid);
+}
+
+// Reconnect to an existing session
+async function reconnectSession(session: SessionInfo): Promise<void> {
+  terminalUI = new TerminalUI(terminalEl);
+  terminalUI.open();
+
+  try {
+    connection = await provider.reconnect(session.id);
+    currentSessionId = session.id;
+
+    const encoder = new TextEncoder();
+
+    connection.onData((data) => {
+      terminalUI?.write(data);
+    });
+
+    terminalUI.onData((data: string) => {
+      connection?.send(encoder.encode(data));
+    });
+
+    terminalUI.onResize((size) => {
+      connection?.resize?.(size.cols, size.rows);
+    });
+
+    setStatus(true, `${session.username}@${session.host}:${session.port}`);
+    showTerminal();
+
+    connectionCheckTimer = setInterval(() => {
+      if (connection && !(connection.isConnected?.() ?? true)) {
+        console.warn("[zerossh] connection lost (detected by health check)");
+        handleDisconnect();
+      }
+    }, 3000);
+  } catch (err) {
+    terminalUI.dispose();
+    terminalUI = null;
+    terminalEl.innerHTML = "";
+    console.error("[zerossh] reconnect error:", err);
+  }
 }
 
 // Dashboard rendering
@@ -221,6 +330,7 @@ async function connectToServer(server: SavedServer, card: HTMLElement): Promise<
 
   try {
     connection = await provider.connect(config);
+    currentSessionId = connection.sessionId;
 
     const encoder = new TextEncoder();
 
@@ -264,7 +374,11 @@ async function onAuthenticated(): Promise<void> {
   showDashboard();
 
   try {
-    const servers = await loadServers();
+    const [servers, sessions] = await Promise.all([
+      loadServers().catch(() => [] as SavedServer[]),
+      provider.listSessions().catch(() => [] as SessionInfo[]),
+    ]);
+    renderActiveSessions(sessions);
     renderDashboard(servers);
   } catch {
     renderDashboard([]);
@@ -399,6 +513,7 @@ async function handleConnect(e: Event): Promise<void> {
 
   try {
     connection = await provider.connect(config);
+    currentSessionId = connection.sessionId;
 
     const encoder = new TextEncoder();
 
@@ -465,25 +580,43 @@ async function handleDisconnect(): Promise<void> {
     connectionCheckTimer = null;
   }
   if (connection) {
+    // Only close the WebSocket; session stays alive in the DO
     await connection.close();
     connection = null;
   }
+  currentSessionId = null;
   terminalUI?.dispose();
   terminalUI = null;
   terminalEl.innerHTML = "";
 
-  showDashboard();
-  try {
-    const servers = await loadServers();
-    renderDashboard(servers);
-  } catch {
-    renderDashboard([]);
+  await onAuthenticated();
+}
+
+async function handleTerminate(): Promise<void> {
+  if (connectionCheckTimer) {
+    clearInterval(connectionCheckTimer);
+    connectionCheckTimer = null;
   }
+  const sessionId = currentSessionId;
+  if (connection) {
+    await connection.close();
+    connection = null;
+  }
+  if (sessionId) {
+    await provider.terminate(sessionId);
+  }
+  currentSessionId = null;
+  terminalUI?.dispose();
+  terminalUI = null;
+  terminalEl.innerHTML = "";
+
+  await onAuthenticated();
 }
 
 // Event listeners
 connectForm.addEventListener("submit", handleConnect);
 disconnectBtn.addEventListener("click", handleDisconnect);
+terminateBtn?.addEventListener("click", handleTerminate);
 
 // Modal close handlers
 document.getElementById("modal-close-btn")!.addEventListener("click", closeModal);
