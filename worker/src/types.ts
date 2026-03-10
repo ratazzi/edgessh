@@ -31,6 +31,22 @@ export interface StoredCredential {
   transports?: AuthenticatorTransport[];
 }
 
+export type SshErrorCode =
+  | "connection_refused"
+  | "auth_failed"
+  | "host_key_mismatch"
+  | "timeout"
+  | "private_ip_denied"
+  | "invalid_port"
+  | "unknown";
+
+export interface SshErrorBody {
+  error: {
+    code: SshErrorCode;
+    message: string;
+  };
+}
+
 type Variables = {
   user: JwtPayload;
 };

@@ -180,6 +180,21 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// Set the expected host key before calling connect().
+/// Pass an empty string or skip calling this to accept any key (first connection).
+#[wasm_bindgen]
+pub fn set_expected_host_key(key: &str) {
+    let key = if key.is_empty() { None } else { Some(key.to_string()) };
+    handler::set_expected(key);
+}
+
+/// After a successful connect(), retrieve the actual host key the server presented.
+/// Returns None if no key was accepted (e.g. mismatch rejection).
+#[wasm_bindgen]
+pub fn take_accepted_host_key() -> Option<String> {
+    handler::take_accepted()
+}
+
 /// A connected SSH session with PTY+shell.
 #[wasm_bindgen]
 pub struct SshSession {

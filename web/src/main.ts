@@ -1,9 +1,41 @@
 import "./style.css";
 import "@xterm/xterm/css/xterm.css";
-import { DoSessionProvider, type DoConnection, type ServerConfig, type SessionInfo } from "./transport";
+import { DoSessionProvider, SshConnectionError, type DoConnection, type ServerConfig, type SessionInfo } from "./transport";
 import { TerminalUI } from "./terminal";
 import { checkAuthStatus, registerPasskey, loginPasskey, loginDemo, logout, type AuthStatus } from "./auth";
 import { loadServers, saveServers, type SavedServer } from "./servers";
+
+const sshErrorMessages: Record<string, string> = {
+  connection_refused: "Connection refused. Please check the host address and port.",
+  auth_failed: "Authentication failed. Please check your username and password/key.",
+  host_key_mismatch: "Server host key has changed! Possible man-in-the-middle attack.",
+  timeout: "Connection timed out. The server may be unreachable.",
+  private_ip_denied: "Connections to private IP addresses are not allowed.",
+  invalid_port: "Invalid port number.",
+};
+
+function formatSshError(err: unknown): string {
+  if (err instanceof SshConnectionError) {
+    return sshErrorMessages[err.code] ?? err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function computeFingerprint(hostKey: string): Promise<string> {
+  // hostKey format: "ssh-ed25519 AAAA..."
+  const parts = hostKey.split(" ");
+  const algo = parts[0] ?? "";
+  const b64 = parts[1] ?? "";
+  try {
+    const raw = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const hash = await crypto.subtle.digest("SHA-256", raw);
+    const fp = btoa(String.fromCharCode(...new Uint8Array(hash)))
+      .replace(/=+$/, "");
+    return `${algo} SHA256:${fp}`;
+  } catch {
+    return hostKey.slice(0, 50) + "...";
+  }
+}
 
 const provider = new DoSessionProvider();
 let connection: DoConnection | null = null;
@@ -309,6 +341,98 @@ function renderDashboard(servers: SavedServer[]): void {
   emptyState.classList.toggle("hidden", servers.length > 0);
 }
 
+// Show host key confirmation and return whether user accepted
+function showHostKeyConfirm(host: string, port: number, fingerprint: string, anchorEl: HTMLElement): Promise<boolean> {
+  return new Promise((resolve) => {
+    anchorEl.querySelector(".host-key-confirm")?.remove();
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "host-key-confirm mt-2 p-3 bg-amber-50 border border-amber-200 rounded text-xs";
+    wrapper.innerHTML = `
+      <div class="text-amber-800 font-semibold mb-1">First connection to ${host}:${port}</div>
+      <div class="font-mono text-[0.65rem] text-amber-700 mb-2 break-all">${fingerprint}</div>
+      <div class="text-amber-700 mb-2">Do you trust this host and want to continue connecting?</div>
+      <div class="flex gap-2">
+        <button type="button" class="hk-accept px-2 py-1 text-xs bg-emerald-600 text-white rounded cursor-pointer border-none">Trust & Connect</button>
+        <button type="button" class="hk-reject px-2 py-1 text-xs bg-slate-200 text-slate-700 rounded cursor-pointer border-none">Reject</button>
+      </div>
+    `;
+    wrapper.querySelector(".hk-accept")!.addEventListener("click", (e) => { e.stopPropagation(); wrapper.remove(); resolve(true); });
+    wrapper.querySelector(".hk-reject")!.addEventListener("click", (e) => { e.stopPropagation(); wrapper.remove(); resolve(false); });
+    anchorEl.appendChild(wrapper);
+  });
+}
+
+async function handleHostKeyConfirm(
+  conn: DoConnection,
+  config: ServerConfig,
+  anchorEl: HTMLElement,
+): Promise<boolean> {
+  if (!conn.hostKeyUnknown || !conn.hostKey) return true;
+
+  const fingerprint = await computeFingerprint(conn.hostKey);
+  const accepted = await showHostKeyConfirm(config.host, config.port, fingerprint, anchorEl);
+
+  if (accepted) {
+    await provider.acceptHostKey(conn.sessionId, config.host, config.port, conn.hostKey);
+    return true;
+  } else {
+    await conn.close();
+    await provider.terminate(conn.sessionId);
+    return false;
+  }
+}
+
+function showHostKeyWarning(config: ServerConfig, anchorEl: HTMLElement): void {
+  anchorEl.querySelector(".card-error")?.remove();
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "card-error mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs";
+  wrapper.innerHTML = `
+    <div class="text-red-700 font-semibold mb-1">${sshErrorMessages.host_key_mismatch}</div>
+    <button type="button" class="accept-host-key-btn text-red-600 underline cursor-pointer bg-transparent border-none p-0 text-xs">Accept new key & reconnect</button>
+  `;
+
+  wrapper.querySelector(".accept-host-key-btn")!.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    wrapper.remove();
+    const newConfig = { ...config, acceptNewHostKey: true };
+
+    terminalUI = new TerminalUI(terminalEl);
+    terminalUI.open();
+
+    try {
+      connection = await provider.connect(newConfig);
+      currentSessionId = connection.sessionId;
+
+      const encoder = new TextEncoder();
+      connection.onData((data) => terminalUI?.write(data));
+      terminalUI.onData((data: string) => connection?.send(encoder.encode(data)));
+      terminalUI.onResize((size) => connection?.resize?.(size.cols, size.rows));
+
+      setStatus(true, `${config.username}@${config.host}:${config.port}`);
+      showTerminal();
+
+      connectionCheckTimer = setInterval(() => {
+        if (connection && !(connection.isConnected?.() ?? true)) {
+          handleDisconnect();
+        }
+      }, 3000);
+    } catch (retryErr) {
+      terminalUI?.dispose();
+      terminalUI = null;
+      terminalEl.innerHTML = "";
+      const errEl = document.createElement("div");
+      errEl.className = "card-error text-xs text-red-500 mt-2";
+      errEl.textContent = formatSshError(retryErr);
+      anchorEl.appendChild(errEl);
+      setTimeout(() => errEl.remove(), 4000);
+    }
+  });
+
+  anchorEl.appendChild(wrapper);
+}
+
 // Direct connect from a saved server card
 async function connectToServer(server: SavedServer, card: HTMLElement): Promise<void> {
   card.classList.add("connecting");
@@ -330,6 +454,23 @@ async function connectToServer(server: SavedServer, card: HTMLElement): Promise<
 
   try {
     connection = await provider.connect(config);
+
+    // First-connection host key confirmation
+    if (connection.hostKeyUnknown) {
+      terminalUI.dispose();
+      terminalUI = null;
+      terminalEl.innerHTML = "";
+      card.classList.remove("connecting");
+      const accepted = await handleHostKeyConfirm(connection, config, card);
+      if (!accepted) {
+        connection = null;
+        return;
+      }
+      // User accepted — reconnect to the live session
+      terminalUI = new TerminalUI(terminalEl);
+      terminalUI.open();
+    }
+
     currentSessionId = connection.sessionId;
 
     const encoder = new TextEncoder();
@@ -356,14 +497,19 @@ async function connectToServer(server: SavedServer, card: HTMLElement): Promise<
       }
     }, 3000);
   } catch (err) {
-    terminalUI.dispose();
+    terminalUI?.dispose();
     terminalUI = null;
     terminalEl.innerHTML = "";
     card.classList.remove("connecting");
 
+    if (err instanceof SshConnectionError && err.code === "host_key_mismatch") {
+      showHostKeyWarning(config, card);
+      return;
+    }
+
     const errEl = document.createElement("div");
     errEl.className = "card-error text-xs text-red-500 mt-2";
-    errEl.textContent = err instanceof Error ? err.message : String(err);
+    errEl.textContent = formatSshError(err);
     card.appendChild(errEl);
 
     setTimeout(() => errEl.remove(), 4000);
@@ -513,6 +659,27 @@ async function handleConnect(e: Event): Promise<void> {
 
   try {
     connection = await provider.connect(config);
+
+    // First-connection host key confirmation
+    if (connection.hostKeyUnknown) {
+      terminalUI.dispose();
+      terminalUI = null;
+      terminalEl.innerHTML = "";
+      setConnecting(false);
+      const fingerprint = await computeFingerprint(connection.hostKey!);
+      const accepted = await showHostKeyConfirm(config.host, config.port, fingerprint, connectForm);
+      if (!accepted) {
+        await connection.close();
+        await provider.terminate(connection.sessionId);
+        connection = null;
+        return;
+      }
+      await provider.acceptHostKey(connection.sessionId, config.host, config.port, connection.hostKey!);
+      // Re-create terminal for the live session
+      terminalUI = new TerminalUI(terminalEl);
+      terminalUI.open();
+    }
+
     currentSessionId = connection.sessionId;
 
     const encoder = new TextEncoder();
@@ -565,12 +732,58 @@ async function handleConnect(e: Event): Promise<void> {
       }
     }, 3000);
   } catch (err) {
-    terminalUI.dispose();
+    terminalUI?.dispose();
     terminalUI = null;
     terminalEl.innerHTML = "";
-    const msg = err instanceof Error ? err.message : String(err);
-    showError(msg);
     setConnecting(false);
+
+    if (err instanceof SshConnectionError && err.code === "host_key_mismatch") {
+      showError(sshErrorMessages.host_key_mismatch);
+      // Add "accept new key" button below error message
+      const acceptBtn = document.createElement("button");
+      acceptBtn.type = "button";
+      acceptBtn.className = "mt-2 text-xs text-red-600 underline cursor-pointer bg-transparent border-none p-0";
+      acceptBtn.textContent = "Accept new key & reconnect";
+      acceptBtn.addEventListener("click", async () => {
+        acceptBtn.remove();
+        hideError();
+        setConnecting(true);
+        config.acceptNewHostKey = true;
+
+        terminalUI = new TerminalUI(terminalEl);
+        terminalUI.open();
+
+        try {
+          connection = await provider.connect(config);
+          currentSessionId = connection.sessionId;
+
+          const enc = new TextEncoder();
+          connection.onData((data) => terminalUI?.write(data));
+          terminalUI.onData((data: string) => connection?.send(enc.encode(data)));
+          terminalUI.onResize((size) => connection?.resize?.(size.cols, size.rows));
+
+          setStatus(true, `${username}@${host}:${port}`);
+          closeModal();
+          showTerminal();
+
+          connectionCheckTimer = setInterval(() => {
+            if (connection && !(connection.isConnected?.() ?? true)) {
+              handleDisconnect();
+            }
+          }, 3000);
+        } catch (retryErr) {
+          terminalUI?.dispose();
+          terminalUI = null;
+          terminalEl.innerHTML = "";
+          showError(formatSshError(retryErr));
+          setConnecting(false);
+        }
+      });
+      errorMsg.appendChild(acceptBtn);
+      return;
+    }
+
+    showError(formatSshError(err));
   }
 }
 

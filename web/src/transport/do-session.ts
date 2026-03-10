@@ -1,7 +1,28 @@
 import type { TransportProvider, Connection, ServerConfig } from "./types";
 
+export type SshErrorCode =
+  | "connection_refused"
+  | "auth_failed"
+  | "host_key_mismatch"
+  | "timeout"
+  | "private_ip_denied"
+  | "invalid_port"
+  | "unknown";
+
+export class SshConnectionError extends Error {
+  readonly code: SshErrorCode;
+
+  constructor(code: SshErrorCode, message: string) {
+    super(message);
+    this.name = "SshConnectionError";
+    this.code = code;
+  }
+}
+
 export interface DoConnection extends Connection {
   sessionId: string;
+  hostKeyUnknown?: boolean;
+  hostKey?: string;
 }
 
 export class DoSessionProvider implements TransportProvider {
@@ -16,14 +37,21 @@ export class DoSessionProvider implements TransportProvider {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error((body as { error?: string }).error || `Session create failed: ${res.status}`);
+      const body = await res.json().catch(() => ({ error: { code: "unknown", message: res.statusText } }));
+      const err = (body as { error?: { code?: SshErrorCode; message?: string } }).error;
+      throw new SshConnectionError(
+        err?.code ?? "unknown",
+        err?.message ?? `Session create failed: ${res.status}`,
+      );
     }
 
-    const { sessionId } = (await res.json()) as { sessionId: string };
+    const data = (await res.json()) as { sessionId: string; hostKeyUnknown?: boolean; hostKey?: string };
 
     // 2. Connect WebSocket to the session
-    return this.connectWs(sessionId);
+    const conn = await this.connectWs(data.sessionId);
+    conn.hostKeyUnknown = data.hostKeyUnknown;
+    conn.hostKey = data.hostKey;
+    return conn;
   }
 
   async reconnect(sessionId: string): Promise<DoConnection> {
@@ -108,6 +136,14 @@ export class DoSessionProvider implements TransportProvider {
         }
         connected = false;
       });
+    });
+  }
+
+  async acceptHostKey(sessionId: string, host: string, port: number, hostKey: string): Promise<void> {
+    await fetch(`/api/sessions/${sessionId}/accept-host-key`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ host, port, hostKey }),
     });
   }
 

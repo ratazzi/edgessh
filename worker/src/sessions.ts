@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AppType } from "./types";
 
 interface ServerConfig {
@@ -10,6 +11,7 @@ interface ServerConfig {
   passphrase: string;
   cols: number;
   rows: number;
+  acceptNewHostKey?: boolean;
 }
 
 interface SessionRecord {
@@ -31,17 +33,39 @@ sessionRoutes.post("/", async (c) => {
   const doId = c.env.SSH_SESSION.idFromName(`${user.sub}:${sessionId}`);
   const stub = c.env.SSH_SESSION.get(doId);
 
+  // Read known_hosts from KV for TOFU
+  const knownHostsKey = `known_hosts:${user.sub}`;
+  const knownHostsRaw = await c.env.ZEROSSH_KV.get(knownHostsKey);
+  const knownHosts: Record<string, string> = knownHostsRaw ? JSON.parse(knownHostsRaw) : {};
+  const hostId = `${config.host}:${config.port}`;
+  let expectedHostKey = knownHosts[hostId] ?? "";
+
+  // If user explicitly accepts a new key, clear the old one
+  if (config.acceptNewHostKey) {
+    expectedHostKey = "";
+  }
+
   const res = await stub.fetch(
     new Request("https://do/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...config, userId: user.sub, sessionId }),
+      body: JSON.stringify({ ...config, userId: user.sub, sessionId, expectedHostKey }),
     }),
   );
 
   if (!res.ok) {
-    const text = await res.text();
-    return c.json({ error: text }, 502);
+    const body = await res.json().catch(() => ({ error: { code: "unknown", message: res.statusText } }));
+    return c.json(body, res.status as ContentfulStatusCode);
+  }
+
+  const doResult = (await res.json()) as { ok: boolean; hostKey?: string };
+
+  const hostWasKnown = !!knownHosts[hostId];
+
+  // Only persist host key if host was already known (key matched) or user explicitly accepted
+  if (doResult.hostKey && (hostWasKnown || config.acceptNewHostKey)) {
+    knownHosts[hostId] = doResult.hostKey;
+    await c.env.ZEROSSH_KV.put(knownHostsKey, JSON.stringify(knownHosts));
   }
 
   // Save session metadata to KV
@@ -56,6 +80,11 @@ sessionRoutes.post("/", async (c) => {
     createdAt: Date.now(),
   });
   await c.env.ZEROSSH_KV.put(key, JSON.stringify(sessions));
+
+  // If first time seeing this host, tell frontend to confirm
+  if (!hostWasKnown && !config.acceptNewHostKey) {
+    return c.json({ sessionId, hostKeyUnknown: true, hostKey: doResult.hostKey });
+  }
 
   return c.json({ sessionId });
 });
@@ -85,6 +114,20 @@ sessionRoutes.delete("/:id", async (c) => {
     const updated = sessions.filter((s) => s.id !== sessionId);
     await c.env.ZEROSSH_KV.put(key, JSON.stringify(updated));
   }
+
+  return c.json({ ok: true });
+});
+
+// Accept host key (first-connection confirmation)
+sessionRoutes.post("/:id/accept-host-key", async (c) => {
+  const user = c.get("user");
+  const { host, port, hostKey } = await c.req.json<{ host: string; port: number; hostKey: string }>();
+
+  const knownHostsKey = `known_hosts:${user.sub}`;
+  const knownHostsRaw = await c.env.ZEROSSH_KV.get(knownHostsKey);
+  const knownHosts: Record<string, string> = knownHostsRaw ? JSON.parse(knownHostsRaw) : {};
+  knownHosts[`${host}:${port}`] = hostKey;
+  await c.env.ZEROSSH_KV.put(knownHostsKey, JSON.stringify(knownHosts));
 
   return c.json({ ok: true });
 });

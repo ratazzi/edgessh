@@ -7,6 +7,7 @@ export interface ServerConfig {
   passphrase: string;
   cols: number;
   rows: number;
+  acceptNewHostKey?: boolean;
 }
 
 export interface Connection {

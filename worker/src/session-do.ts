@@ -1,14 +1,35 @@
 import { DurableObject } from "cloudflare:workers";
 import { connect } from "cloudflare:sockets";
 import { isPrivateIP } from "./proxy";
-import type { Env } from "./types";
+import type { Env, SshErrorCode } from "./types";
 
-import { initSync, SshSession, SshSessionBuilder, SshTransportFeeder } from "zerossh-do";
-// @ts-expect-error — wasm binary import
+import { initSync, SshSession, SshSessionBuilder, SshTransportFeeder, set_expected_host_key, take_accepted_host_key } from "zerossh-do";
+// @ts-ignore — wasm binary import (Cloudflare Workers specific)
 import wasmModule from "zerossh-do/zerossh_do_bg.wasm";
 
 // Initialize WASM synchronously at module load time
 initSync({ module: wasmModule });
+
+function errorResponse(code: SshErrorCode, message: string, status: number): Response {
+  return Response.json({ error: { code, message } }, { status });
+}
+
+function classifySshError(err: unknown): { code: SshErrorCode; message: string } {
+  const msg = String(err);
+  if (msg.includes("Authentication rejected") || msg.includes("Auth failed")) {
+    return { code: "auth_failed", message: msg };
+  }
+  if (msg.includes("host_key_mismatch")) {
+    return { code: "host_key_mismatch", message: msg };
+  }
+  if (msg.includes("Connection refused") || msg.includes("connection refused")) {
+    return { code: "connection_refused", message: msg };
+  }
+  if (msg.includes("timed out") || msg.includes("Timed out")) {
+    return { code: "timeout", message: msg };
+  }
+  return { code: "unknown", message: msg };
+}
 
 interface ConnectRequest {
   host: string;
@@ -21,7 +42,10 @@ interface ConnectRequest {
   rows: number;
   userId: string;
   sessionId: string;
+  expectedHostKey?: string;
 }
+
+const CONNECT_TIMEOUT_MS = 20_000;
 
 export class SshSessionDO extends DurableObject<Env> {
   private session: SshSession | null = null;
@@ -63,11 +87,11 @@ export class SshSessionDO extends DurableObject<Env> {
     console.log(`[do] handleConnect: ${body.username}@${body.host}:${body.port}`);
 
     if (isPrivateIP(body.host)) {
-      return new Response("Connection to private IP denied", { status: 403 });
+      return errorResponse("private_ip_denied", "Connection to private IP denied", 403);
     }
 
     if (!body.port || body.port < 1 || body.port > 65535) {
-      return new Response("Invalid port", { status: 400 });
+      return errorResponse("invalid_port", "Invalid port", 400);
     }
 
     // Open TCP connection
@@ -75,7 +99,8 @@ export class SshSessionDO extends DurableObject<Env> {
     try {
       tcpSocket = connect({ hostname: body.host, port: body.port });
     } catch (e) {
-      return new Response(`TCP connect failed: ${e}`, { status: 502 });
+      const { code, message } = classifySshError(e);
+      return errorResponse(code, `TCP connect failed: ${message}`, 502);
     }
     this.tcpSocket = tcpSocket;
 
@@ -108,23 +133,33 @@ export class SshSessionDO extends DurableObject<Env> {
     console.log("[do] starting TCP pump");
     this.pumpTcpToWasm(tcpSocket, feeder);
 
-    // Phase 3: SSH handshake (feeder is independent, no borrow conflict)
+    // Set expected host key for TOFU verification
+    set_expected_host_key(body.expectedHostKey ?? "");
+
+    // Phase 3: SSH handshake with timeout (feeder is independent, no borrow conflict)
     console.log("[do] starting SSH handshake");
     try {
-      this.session = await builder.connect(
-        body.username,
-        body.authType,
-        body.credential,
-        body.passphrase,
-        body.cols,
-        body.rows,
-      );
+      this.session = await Promise.race([
+        builder.connect(
+          body.username,
+          body.authType,
+          body.credential,
+          body.passphrase,
+          body.cols,
+          body.rows,
+        ),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Connection timed out")), CONNECT_TIMEOUT_MS),
+        ),
+      ]);
     } catch (e) {
       console.error("[do] SSH connect failed:", e);
       tcpSocket.close();
       this.tcpSocket = null;
-      return new Response(`SSH connect failed: ${e}`, { status: 502 });
+      const { code, message } = classifySshError(e);
+      return errorResponse(code, message, 502);
     }
+    const hostKey = take_accepted_host_key() ?? undefined;
     console.log("[do] SSH connected successfully");
 
     this.sessionMeta = {
@@ -139,7 +174,7 @@ export class SshSessionDO extends DurableObject<Env> {
     // Set idle alarm (no WS clients yet)
     await this.ctx.storage.setAlarm(Date.now() + this.idleTimeout);
 
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, hostKey });
   }
 
   private handleWebSocket(_request: Request): Response {
