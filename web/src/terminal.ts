@@ -13,9 +13,9 @@ export class TerminalUI {
     this.container = container;
     this.fitAddon = new FitAddon();
     this.terminal = new Terminal({
-      fontFamily: '"IBM Plex Mono", "SF Mono", "Cascadia Code", monospace',
+      fontFamily: '"Maple Mono NF CN", "IBM Plex Mono", "SF Mono", "Cascadia Code", monospace',
       fontSize: 14,
-      lineHeight: 1.2,
+      lineHeight: 1.0,
       theme: {
         background: "#0a0e14",
         foreground: "#e6edf3",
