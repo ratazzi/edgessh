@@ -1,0 +1,25 @@
+name = "zerossh"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./public"
+
+[[kv_namespaces]]
+binding = "ZEROSSH_KV"
+id = "<your-kv-namespace-id>"
+
+[durable_objects]
+bindings = [
+  { name = "SSH_SESSION", class_name = "SshSessionDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SshSessionDO"]
+
+# Optional: custom domain
+# [[routes]]
+# pattern = "ssh.example.com"
+# custom_domain = true

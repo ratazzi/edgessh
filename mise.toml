@@ -1,0 +1,30 @@
+[tasks.wasm-do]
+description = "Build zerossh-do WASM package"
+run = "wasm-pack build crates/zerossh-do --target web --release"
+
+[tasks.wasm-web]
+description = "Build zerossh-wasm WASM package"
+run = "wasm-pack build crates/zerossh-wasm --target web --release"
+
+[tasks.wasm]
+description = "Build all WASM packages"
+depends = ["wasm-do", "wasm-web"]
+
+[tasks.web]
+description = "Build web frontend (outputs to worker/public)"
+depends = ["wasm"]
+run = "cd web && npm run build"
+
+[tasks.lint]
+description = "Run cargo clippy and tsc checks"
+depends = ["wasm"]
+run = """
+cargo clippy --target wasm32-unknown-unknown -p zerossh-do -p zerossh-wasm
+cd worker && npx tsc --noEmit
+cd ../web && npx tsc --noEmit
+"""
+
+[tasks.deploy]
+description = "Full build and deploy to Cloudflare"
+depends = ["web"]
+run = "cd worker && npx wrangler deploy"

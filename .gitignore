@@ -7,3 +7,4 @@ pkg/
 *.wasm
 !web/public/*.wasm
 worker/public/
+wrangler.toml
