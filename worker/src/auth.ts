@@ -65,7 +65,7 @@ authRoutes.post("/register/options", async (c) => {
 
   const rpID = getRpId(c);
   const options = await generateRegistrationOptions({
-    rpName: "ZeroSSH",
+    rpName: "EdgeSSH",
     rpID,
     userName: "owner",
     authenticatorSelection: {
